@@ -3,19 +3,19 @@
   (:use [slingshot.slingshot :only [throw+]]))
 
 (defn saas? [ctx]
-  (get-in (first ctx) [:sec/token :sec/claims ::saas]))
+  (get-in (first ctx) [:sec/claims ::saas]))
 
 (def measurements-sink (atom []))
 (def config (atom {}))
 
 (defn subscription [ctx]
-  (get-in (last ctx) [:sec/token :sec/claims ::subscription]))
+  (get-in (last ctx) [:sec/claims ::subscription]))
 
 (defn measure [ctx key value]
   (swap! measurements-sink conj [(subscription ctx) key value]))
 
 (defn claim [ctx key value]
-  (assoc-in ctx [:sec/token :sec/claims key] value))
+  (assoc-in ctx [:sec/claims key] value))
 
 (defn token [credentials roles]
   {:sec/claims {:sec/tenant ::sap
@@ -26,13 +26,13 @@
 
 (defn tenant [ctx]
   (some (fn [ctx]
-          (get-in ctx [:sec/token :sec/claims :sec/tenant]))
+          (get-in ctx [:sec/claims :sec/tenant]))
         (reverse ctx)))
 
 (defn roles [ctx]
   ; does it really make sense to combine all roles? do we grant too much privileges to the calller?
   (apply clojure.set/union (map (fn [ctx]
-                                  (get-in ctx [:sec/token :sec/claims :sec/roles]))
+                                  (get-in ctx [:sec/claims :sec/roles]))
                                 ctx)))
 
 (defn call [{:keys [::service] :as service-description} function ctx & args]
@@ -43,8 +43,8 @@
                                                               (some (fn [rule]
                                                                       (rule ctx)) rules))]
     (fn [function ctx & args]
-      (apply call service-description function (conj ctx {:sec/token {:sec/claims {::subscription subscription
-                                                                                   :sec/signature ""}}}) args))
+      (apply call service-description function (conj ctx {:sec/claims {::subscription subscription
+                                                                       :sec/signature ""}}) args))
     (throw+ {:type ::service-not-found :hint service})))
 
 (defn authorized? [service function ctx requested-scope]
@@ -64,7 +64,7 @@
     (throw+ {:type ::function-not-found :hint function})))
 
 (defn saas-ui-browser [credentials]
-  (let [ctx [(-> {:sec/token (token credentials #{::product-manager})}
+  (let [ctx [(-> (token credentials #{::product-manager})
                  (claim ::saas true))]
         product-service (lookup ctx :hybris/product-service)]
     (product-service :hybris/product-service-get ctx :sku123)))
@@ -82,4 +82,4 @@
   (saas-ui-browser {}))
 
 (comment
-  (authorized? :hybris/product-service :hybris/product-service-get {:sec/token {:sec/claims {:sec/tenant ::sap :sec/roles #{::product-manager ::sales-representative}}}} #{::product-read}))
+  (authorized? :hybris/product-service :hybris/product-service-get {:sec/claims {:sec/tenant ::sap :sec/roles #{::product-manager ::sales-representative}}} #{::product-read}))
