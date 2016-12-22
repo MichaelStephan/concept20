@@ -6,14 +6,7 @@
   (get-in (first ctx) [:sec/token :sec/claims ::saas]))
 
 (def measurements-sink (atom []))
-(def config (atom {::sap {::authorization {::product-manager #{::product-read}}
-                          ::mapping {:hybris/product-service [(fn [ctx]
-                                                                (when (saas? ctx)
-                                                                  {::service product-service
-                                                                   ::subscription ::some-saas-subscription}))
-                                                              (fn [ctx]
-                                                                {::service product-service
-                                                                 ::subscription ::some-low-touch-subscription})]}}}))
+(def config (atom {}))
 
 (defn subscription [ctx]
   (get-in (last ctx) [:sec/token :sec/claims ::subscription]))
@@ -75,6 +68,15 @@
                  (claim ::saas true))]
         product-service (lookup ctx :hybris/product-service)]
     (product-service :hybris/product-service-get ctx :sku123)))
+
+(reset! config {::sap {::authorization {::product-manager #{::product-read}}
+                       ::mapping {:hybris/product-service [(fn [ctx]
+                                                             (when (saas? ctx)
+                                                               {::service product-service
+                                                                ::subscription ::some-saas-subscription}))
+                                                           (fn [ctx]
+                                                             {::service product-service
+                                                              ::subscription ::some-low-touch-subscription})]}}})
 
 (comment
   (saas-ui-browser {}))
