@@ -5,23 +5,30 @@
 (defn saas? [ctx]
   (get-in (first ctx) [:sec/claims ::saas]))
 
-(def measurements-sink (atom []))
+(def identities {"michael.stephan@sap.com" {:sec/id "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+                                            :sec/password "123"
+                                            :sec/tenant ::sap
+                                            :sec/roles #{::product-manager}}})
+(def measurement-sink (atom []))
 (def config (atom {}))
 
 (defn subscription [ctx]
   (get-in (last ctx) [:sec/claims ::subscription]))
 
 (defn measure [ctx key value]
-  (swap! measurements-sink conj [(subscription ctx) key value]))
+  (swap! measurement-sink conj [(subscription ctx) key value]))
 
 (defn claim [ctx key value]
   (assoc-in ctx [:sec/claims key] value))
 
-(defn token [credentials roles]
-  {:sec/claims {:sec/tenant ::sap
-                :sec/principal {:id "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
-                                :origin "https://sapidentity.com"}
-                :sec/roles #{::product-manager}}
+(defn token [{:keys [:sec/username :sec/password] :as credentials} roles]
+  {:sec/claims (let [{stored-password :sec/password :as stored-credentials} (get identities username)]
+                 (if (= stored-password password)
+                   (-> stored-credentials
+                       (dissoc :sec/password)
+                       (assoc :sec/principal username)
+                       (assoc :sec/provider "https://sap-identity-provider"))
+                   (throw+ {:type ::not-authenticated :hint "invalid password"})))
    :sec/signature ""})
 
 (defn tenant [ctx]
