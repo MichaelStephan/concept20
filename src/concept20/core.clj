@@ -2,6 +2,8 @@
   (:require [clojure.spec :as s])
   (:use [slingshot.slingshot :only [throw+]]))
 
+;context helper
+
 (defn saas? [ctx]
   (some (fn [ctx]
           (get-in ctx [:sec/claims :yaas/saas])) ctx))
@@ -26,10 +28,12 @@
         (reverse ctx)))
 
 (defn roles [ctx]
-  ; does it really make sense to combine all roles? do we grant too much privileges to the calller?
+  ; does it really make sense to combine all roles? do we grant too much privileges to the caller?
   (apply clojure.set/union (map (fn [ctx]
                                   (get-in ctx [:sec/claims :sec/roles]))
                                 ctx)))
+
+; platform 
 
 (defn authenticate [yaas {:keys [:sec/username :sec/password] :as credentials}]
   [{:sec/claims (let [{stored-password :sec/password :as stored-credentials} (get-in @yaas [:yaas/authentication-db (dissoc credentials :sec/password)])]
@@ -65,6 +69,16 @@
                                                                             :sec/signature ""}}) args))
     (throw+ {:type ::service-not-found :hint service})))
 
+(defn subscribe [yaas ctx service-bundle]
+  (let [service :hybris/platform
+        function :hybris/subscription-service-subscribe]
+    (if (authorized? yaas service function ctx #{:scope/subscription-manage})
+      (swap! yaas assoc-in [:yaas/subscriptions (tenant ctx) (-> (java.util.UUID/randomUUID) str keyword)] {:service-bundle/id service-bundle
+                                                                                                            :subscription/created (System/currentTimeMillis)})
+      (throw+ {:type ::not-authorized :hint (str service "/" function)}))))
+
+; top level applications
+
 (defn product-service [yaas function ctx & args]
   (measure yaas ctx ::api-call 1)
   (condp = function
@@ -75,11 +89,16 @@
                                   (throw+ {:type ::not-authorized :hint (str :hybris/product-service "/" function)}))
     (throw+ {:type ::function-not-found :hint function})))
 
+(defn category-service [yaas function ctx & args])
+
+(defn subscription-ui-browser [yaas credentials service-bundle]
+  (let [ctx (->> (authenticate yaas credentials)
+                 (authorize yaas #{:role/administrator}))]
+    (subscribe yaas ctx service-bundle)))
+
 (defn saas-ui-browser [yaas credentials]
   (let [ctx (->> (authenticate yaas credentials)
                  (authorize yaas #{:role/product-manager})
                  (claim-saas))
         product-service (lookup yaas ctx :hybris/product-service)]
     (product-service :hybris/product-service-get ctx :sku123)))
-
-;
