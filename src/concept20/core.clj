@@ -3,7 +3,8 @@
   (:use [slingshot.slingshot :only [throw+]]))
 
 (defn saas? [ctx]
-  (get-in (first ctx) [:sec/claims :yaas/saas]))
+  (some (fn [ctx]
+          (get-in ctx [:sec/claims :yaas/saas])) ctx))
 
 (defn subscription [ctx]
   (get-in (last ctx) [:sec/claims :yaas/subscription]))
@@ -11,18 +12,13 @@
 (defn measure [yaas ctx key value]
   (swap! yaas update-in [:yaas/measurements] conj [(subscription ctx) key value]))
 
-(defn claim [ctx key value]
-  (assoc-in ctx [:sec/claims key] value))
+(defn claim-saas [ctx]
+  (conj ctx {:sec/claims {:yaas/saas true}}))
 
-(defn token [yaas {:keys [:sec/username :sec/password] :as credentials} roles]
-  {:sec/claims (let [{stored-password :sec/password :as stored-credentials} (get-in @yaas [:yaas/authentication-db username])]
-                 (if (= stored-password password)
-                   (-> stored-credentials
-                       (dissoc :sec/password)
-                       (assoc :sec/principal username)
-                       (assoc :sec/provider "https://sap-identity-provider"))
-                   (throw+ {:type ::not-authenticated :hint "invalid password"})))
-   :sec/signature ""})
+(defn user-id [ctx]
+  (some (fn [ctx]
+          (get-in ctx [:sec/claims :sec/id]))
+        (reverse ctx)))
 
 (defn tenant [ctx]
   (some (fn [ctx]
@@ -34,6 +30,28 @@
   (apply clojure.set/union (map (fn [ctx]
                                   (get-in ctx [:sec/claims :sec/roles]))
                                 ctx)))
+
+(defn authenticate [yaas {:keys [:sec/username :sec/password] :as credentials}]
+  [{:sec/claims (let [{stored-password :sec/password :as stored-credentials} (get-in @yaas [:yaas/authentication-db (dissoc credentials :sec/password)])]
+                  (if (= stored-password password)
+                    (-> stored-credentials
+                        (dissoc :sec/password)
+                        (assoc :sec/username username)
+                        (assoc :sec/provider "https://sap-identity-provider"))
+                    (throw+ {:type ::not-authenticated :hint "invalid password"})))
+    :sec/signature ""}])
+
+(defn authorize [yaas roles ctx]
+  (let [active-roles (clojure.set/intersection roles (get-in @yaas [:yaas/authorization-db (user-id ctx) :sec/roles]))]
+    (if (= roles active-roles)
+      (conj ctx {:sec/claims {:sec/roles active-roles}})
+      (throw+ {:type ::not-authorized :hint "requested roles not assigned"}))))
+
+(defn authorized? [yaas service function ctx requested-scope]
+  (= requested-scope (clojure.set/intersection
+                      (apply clojure.set/union (for [role (roles ctx)]
+                                                 (get-in @yaas [:yaas/config-db (tenant ctx) :config/authorization role] #{})))
+                      requested-scope)))
 
 (defn call [yaas {:keys [:yaas/service] :as service-description} function ctx & args]
   (apply service yaas function ctx args))
@@ -47,12 +65,6 @@
                                                                             :sec/signature ""}}) args))
     (throw+ {:type ::service-not-found :hint service})))
 
-(defn authorized? [yaas service function ctx requested-scope]
-  (= requested-scope (clojure.set/intersection
-                      (apply clojure.set/union (for [role (roles ctx)]
-                                                 (get-in @yaas [:yaas/config-db (tenant ctx) :config/authorization role] #{})))
-                      requested-scope)))
-
 (defn product-service [yaas function ctx & args]
   (measure yaas ctx ::api-call 1)
   (condp = function
@@ -60,11 +72,14 @@
                                   (let [[id] args]
                                     [{:id id
                                       :name "banana"}])
-                                  {:type ::not-authorized :hint (str :hybris/product-service "/" function)})
+                                  (throw+ {:type ::not-authorized :hint (str :hybris/product-service "/" function)}))
     (throw+ {:type ::function-not-found :hint function})))
 
 (defn saas-ui-browser [yaas credentials]
-  (let [ctx [(-> (token yaas credentials #{:role/product-manager})
-                 (claim :yaas/saas true))]
+  (let [ctx (->> (authenticate yaas credentials)
+                 (authorize yaas #{:role/product-manager})
+                 (claim-saas))
         product-service (lookup yaas ctx :hybris/product-service)]
     (product-service :hybris/product-service-get ctx :sku123)))
+
+;
