@@ -3,26 +3,19 @@
   (:use [slingshot.slingshot :only [throw+]]))
 
 (defn saas? [ctx]
-  (get-in (first ctx) [:sec/claims ::saas]))
-
-(def identities {"michael.stephan@sap.com" {:sec/id "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
-                                            :sec/password "123"
-                                            :sec/tenant ::sap
-                                            :sec/roles #{::product-manager}}})
-(def measurement-sink (atom []))
-(def config (atom {}))
+  (get-in (first ctx) [:sec/claims :yaas/saas]))
 
 (defn subscription [ctx]
-  (get-in (last ctx) [:sec/claims ::subscription]))
+  (get-in (last ctx) [:sec/claims :yaas/subscription]))
 
-(defn measure [ctx key value]
-  (swap! measurement-sink conj [(subscription ctx) key value]))
+(defn measure [yaas ctx key value]
+  (swap! yaas update-in [:yaas/measurements] conj [(subscription ctx) key value]))
 
 (defn claim [ctx key value]
   (assoc-in ctx [:sec/claims key] value))
 
-(defn token [{:keys [:sec/username :sec/password] :as credentials} roles]
-  {:sec/claims (let [{stored-password :sec/password :as stored-credentials} (get identities username)]
+(defn token [yaas {:keys [:sec/username :sec/password] :as credentials} roles]
+  {:sec/claims (let [{stored-password :sec/password :as stored-credentials} (get-in @yaas [:yaas/authentication-db username])]
                  (if (= stored-password password)
                    (-> stored-credentials
                        (dissoc :sec/password)
@@ -42,51 +35,36 @@
                                   (get-in ctx [:sec/claims :sec/roles]))
                                 ctx)))
 
-(defn call [{:keys [::service] :as service-description} function ctx & args]
-  (apply service function ctx args))
+(defn call [yaas {:keys [:yaas/service] :as service-description} function ctx & args]
+  (apply service yaas function ctx args))
 
-(defn lookup [ctx service]
-  (if-let [{:keys [::subscription] :as service-description} (let [rules (get-in @config [(tenant ctx) ::mapping service])]
-                                                              (some (fn [rule]
-                                                                      (rule ctx)) rules))]
+(defn lookup [yaas ctx service]
+  (if-let [{:keys [:yaas/subscription] :as service-description} (let [rules (get-in @yaas [:yaas/config-db (tenant ctx) :config/mapping service])]
+                                                                  (some (fn [rule]
+                                                                          (rule ctx)) rules))]
     (fn [function ctx & args]
-      (apply call service-description function (conj ctx {:sec/claims {::subscription subscription
-                                                                       :sec/signature ""}}) args))
+      (apply call yaas service-description function (conj ctx {:sec/claims {:yaas/subscription subscription
+                                                                            :sec/signature ""}}) args))
     (throw+ {:type ::service-not-found :hint service})))
 
-(defn authorized? [service function ctx requested-scope]
+(defn authorized? [yaas service function ctx requested-scope]
   (= requested-scope (clojure.set/intersection
                       (apply clojure.set/union (for [role (roles ctx)]
-                                                 (get-in @config [(tenant ctx) ::authorization role] #{})))
+                                                 (get-in @yaas [:yaas/config-db (tenant ctx) :config/authorization role] #{})))
                       requested-scope)))
 
-(defn product-service [function ctx & args]
-  (measure ctx ::api-call 1)
+(defn product-service [yaas function ctx & args]
+  (measure yaas ctx ::api-call 1)
   (condp = function
-    :hybris/product-service-get (if (authorized? :hybris/product-service function ctx #{::product-read})
+    :hybris/product-service-get (if (authorized? yaas :hybris/product-service function ctx #{:scope/product-read})
                                   (let [[id] args]
                                     [{:id id
                                       :name "banana"}])
                                   {:type ::not-authorized :hint (str :hybris/product-service "/" function)})
     (throw+ {:type ::function-not-found :hint function})))
 
-(defn saas-ui-browser [credentials]
-  (let [ctx [(-> (token credentials #{::product-manager})
-                 (claim ::saas true))]
-        product-service (lookup ctx :hybris/product-service)]
+(defn saas-ui-browser [yaas credentials]
+  (let [ctx [(-> (token yaas credentials #{:role/product-manager})
+                 (claim :yaas/saas true))]
+        product-service (lookup yaas ctx :hybris/product-service)]
     (product-service :hybris/product-service-get ctx :sku123)))
-
-(reset! config {::sap {::authorization {::product-manager #{::product-read}}
-                       ::mapping {:hybris/product-service [(fn [ctx]
-                                                             (when (saas? ctx)
-                                                               {::service product-service
-                                                                ::subscription ::some-saas-subscription}))
-                                                           (fn [ctx]
-                                                             {::service product-service
-                                                              ::subscription ::some-low-touch-subscription})]}}})
-
-(comment
-  (saas-ui-browser {}))
-
-(comment
-  (authorized? :hybris/product-service :hybris/product-service-get {:sec/claims {:sec/tenant ::sap :sec/roles #{::product-manager ::sales-representative}}} #{::product-read}))
