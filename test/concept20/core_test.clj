@@ -4,9 +4,9 @@
 
 (defn yaas []
   (atom
-   {:yaas/service-bundle [{:service-bundle/id "product-content-management-v1" :yaas/services [concept20.core/product-service]}
-                          {:service-bundle/id "product-content-management-v2" :yaas/services [concept20.core/product-service
-                                                                                              concept20.core/category-service]}]
+   {:yaas/service-bundles {::product-content-management-v1 {:yaas/services [[:hybris/product-service concept20.core/product-service]]}
+                           ::product-content-management-v2 {:yaas/services [[:hybris/product-service concept20.core/product-service]
+                                                                            [:hybris/category-service concept20.core/category-service]]}}
     :yaas/subscriptions {}
     :yaas/measurements []
     :yaas/authentication-db {{:sec/username "MichaelStephan1982"
@@ -18,20 +18,12 @@
     :yaas/authorization-db {"6ba7b810-9dad-11d1-80b4-00c04fd430c8" {:sec/roles #{:role/product-manager :role/administrator}}}
     :yaas/config-db {::sap {:config/authorization {:role/product-manager #{:scope/product-read}
                                                    :role/administrator #{:scope/subscription-manage}}
-                            :config/mapping {:hybris/product-service [(fn [ctx]
-                                                                        (when (saas? ctx)
-                                                                          {:yaas/service concept20.core/product-service
-                                                                           :yaas/subscription ::some-saas-subscription}))
-                                                                      (fn [ctx]
-                                                                        {:yaas/service concept20.core/product-service
-                                                                         :yaas/subscription ::some-low-touch-subscription})]}}}}))
+                            :config/discovery {:hybris/product-service []}}}}))
 
 (deftest test-saas-ui-browser
   (testing "Calling service from saas ui from customer's browser"
     (let [yaas (yaas)
           credentials {:sec/username "MichaelStephan1982" :sec/password "123" :sec/purpose "e-commmerce backoffice"}]
-      (subscription-ui-browser yaas credentials "product-content-management-v1")
-      (subscription-ui-browser yaas credentials "product-content-management-v2")
+      #_(subscription-ui-browser yaas credentials [::product-content-management-v1 ::product-content-management-v2])
       (saas-ui-browser yaas credentials)
-      (clojure.pprint/pprint @yaas)
-      (get @yaas :yaas/measurements))))
+      (clojure.pprint/pprint @yaas))))

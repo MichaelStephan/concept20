@@ -61,20 +61,39 @@
   (apply service yaas function ctx args))
 
 (defn lookup [yaas ctx service]
-  (if-let [{:keys [:yaas/subscription] :as service-description} (let [rules (get-in @yaas [:yaas/config-db (tenant ctx) :config/mapping service])]
-                                                                  (some (fn [rule]
-                                                                          (rule ctx)) rules))]
+  (if-let [{:keys [:yaas/subscription] :as service-description} (let [filters (get-in @yaas [:yaas/config-db (tenant ctx) :config/discovery service])]
+                                                                  (some (fn [{:keys [rule]}]
+                                                                          (rule ctx)) filters))]
     (fn [function ctx & args]
       (apply call yaas service-description function (conj ctx {:sec/claims {:yaas/subscription subscription
                                                                             :sec/signature ""}}) args))
     (throw+ {:type ::service-not-found :hint service})))
 
-(defn subscribe [yaas ctx service-bundle]
-  (let [service :hybris/platform
-        function :hybris/subscription-service-subscribe]
+(defn provision [yaas ctx services {:keys [:subscription/id]}]
+  (doall (for [[service-type services] services]
+           (doall (for [[type] services]
+                    (swap! yaas assoc-in [:yaas/subscriptions (tenant ctx) id :subscription/state service-type type] :provision/done))))))
+
+(defn announce [yaas ctx services subscription-id]
+  (doall (for [[id uri] (get services :yaas/services)]
+           (swap! yaas update-in [:yaas/config-db (tenant ctx) :config/discovery id] conj {:yaas/subscription subscription-id
+                                                                                           :rule (fn [ctx]
+                                                                                                   {:yaas/service uri
+                                                                                                    :yaas/subscription subscription-id})}))))
+
+(defn subscribe [yaas ctx service-bundle-id]
+  (let [service :hybris/platform function :hybris/subscription-service-subscribe
+        subscription-id (-> (java.util.UUID/randomUUID) str keyword)
+        subscription {:service-bundle/id service-bundle-id
+                      :subscription/state {}
+                      :subscription/created (System/currentTimeMillis)}]
     (if (authorized? yaas service function ctx #{:scope/subscription-manage})
-      (swap! yaas assoc-in [:yaas/subscriptions (tenant ctx) (-> (java.util.UUID/randomUUID) str keyword)] {:service-bundle/id service-bundle
-                                                                                                            :subscription/created (System/currentTimeMillis)})
+      (if-let [service-bundle (get-in @yaas [:yaas/service-bundles service-bundle-id])]
+        (do
+          (swap! yaas assoc-in [:yaas/subscriptions (tenant ctx) subscription-id] subscription)
+          (provision yaas ctx service-bundle (assoc subscription :subscription/id subscription-id))
+          (announce yaas ctx service-bundle subscription-id))
+        (throw+ {:type ::not-found :hint (str "service bundle '" service-bundle-id "'not found")}))
       (throw+ {:type ::not-authorized :hint (str service "/" function)}))))
 
 ; top level applications
@@ -91,10 +110,11 @@
 
 (defn category-service [yaas function ctx & args])
 
-(defn subscription-ui-browser [yaas credentials service-bundle]
+(defn subscription-ui-browser [yaas credentials service-bundles]
   (let [ctx (->> (authenticate yaas credentials)
                  (authorize yaas #{:role/administrator}))]
-    (subscribe yaas ctx service-bundle)))
+    (doall (for [service-bundle service-bundles]
+             (subscribe yaas ctx service-bundle)))))
 
 (defn saas-ui-browser [yaas credentials]
   (let [ctx (->> (authenticate yaas credentials)
