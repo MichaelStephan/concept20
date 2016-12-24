@@ -2,6 +2,14 @@
   (:require [clojure.spec :as s])
   (:use [slingshot.slingshot :only [throw+]]))
 
+; IDEAS
+
+; * when service A (=caller) calls service B (=callee) caller adds signed nonce (=proof of identity) into ctx
+; * ctx elements may be subject to ttl rules, e.g. a ctx element can be configured to only survive 5 hops until it is dropped
+; * ctx element may be added to be readable by certain service only (encrypted using public key)
+; * on service startup services register themselves among each other and exchange secrets
+
+
 ;context helper
 
 (defn saas? [ctx]
@@ -35,8 +43,11 @@
 
 ; platform 
 
+(defn load-credentials [yaas credentials]
+  (get-in @yaas [:yaas/authentication-db (dissoc credentials :sec/password)]))
+
 (defn authenticate [yaas {:keys [:sec/username :sec/password] :as credentials}]
-  [{:sec/claims (let [{stored-password :sec/password :as stored-credentials} (get-in @yaas [:yaas/authentication-db (dissoc credentials :sec/password)])]
+  [{:sec/claims (let [{stored-password :sec/password :as stored-credentials} (load-credentials yaas credentials)]
                   (if (= stored-password password)
                     (-> stored-credentials
                         (dissoc :sec/password)
@@ -89,10 +100,10 @@
                       :subscription/created (System/currentTimeMillis)}]
     (if (authorized? yaas service function ctx #{:scope/subscription-manage})
       (if-let [service-bundle (get-in @yaas [:yaas/service-bundles service-bundle-id])]
-        (do
-          (swap! yaas assoc-in [:yaas/subscriptions (tenant ctx) subscription-id] subscription)
-          (provision yaas ctx service-bundle (assoc subscription :subscription/id subscription-id))
-          (announce yaas ctx service-bundle subscription-id))
+        (doto yaas
+          (swap! assoc-in [:yaas/subscriptions (tenant ctx) subscription-id] subscription)
+          (provision ctx service-bundle (assoc subscription :subscription/id subscription-id))
+          (announce ctx service-bundle subscription-id))
         (throw+ {:type ::not-found :hint (str "service bundle '" service-bundle-id "'not found")}))
       (throw+ {:type ::not-authorized :hint (str service "/" function)}))))
 

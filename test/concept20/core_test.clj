@@ -24,6 +24,6 @@
   (testing "Calling service from saas ui from customer's browser"
     (let [yaas (yaas)
           credentials {:sec/username "MichaelStephan1982" :sec/password "123" :sec/purpose "e-commmerce backoffice"}]
-      #_(subscription-ui-browser yaas credentials [::product-content-management-v1 ::product-content-management-v2]) ;; TODO can I be subscribed to two bundles containing the same service
+      (subscription-ui-browser yaas credentials [::product-content-management-v1 ::product-content-management-v2]) ;; TODO can I be subscribed to two bundles containing the same service
       (saas-ui-browser yaas credentials)
       (clojure.pprint/pprint @yaas))))
