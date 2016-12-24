@@ -2,12 +2,15 @@
   (:require [clojure.spec :as s])
   (:use [slingshot.slingshot :only [throw+]]))
 
-; IDEAS
+; IDEAs
 
 ; * when service A (=caller) calls service B (=callee) caller adds signed nonce (=proof of identity) into ctx
 ; * ctx elements may be subject to ttl rules, e.g. a ctx element can be configured to only survive 5 hops until it is dropped
 ; * ctx element may be added to be readable by certain service only (encrypted using public key)
 ; * on service startup services register themselves among each other and exchange secrets
+
+; TODOs
+; * :config/discovery contains map with service identifier used as keys. The key should become another map to allow for all items to be looked up, not only services 
 
 
 ;context helper
