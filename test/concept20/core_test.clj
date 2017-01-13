@@ -6,9 +6,15 @@
   (atom {:yaas/services {:hybris/data-storage-service-v1 {:sec/scopes #{:scope/data-storage-read :scope/data-storage-manage}
                                                           :yaas/depends-on []}
                          :hybris/product-service-v1 {:sec/scopes #{:scope/product-read :scope/product-manage}
-                                                     :yaas/depends-on [::data-storage-v1]}
+                                                     :yaas/depends-on [{:yaas/use-case ::todo
+                                                                        :yaas/service-bundle ::data-storage-v1
+                                                                        :yaas/service :hybris/data-storage-service-v1
+                                                                        :sec/scopes #{:scope/data-storage-read_}}]}
                          :hybris/category-service-v2 {:sec/scopes #{:scope/product-read :scope/product-manage}
-                                                      :yaas/depends-on [::data-storage-v1]}}
+                                                      :yaas/depends-on [{:yaas/use-case ::todo
+                                                                         :yaas/service-bundle ::data-storage-v1
+                                                                         :yaas/service :hybris/data-storage-service-v1
+                                                                         :sec/scopes #{:scope/data-storage-read}}]}}
          :yaas/service-bundles {::data-storage-v1 {:yaas/services [[:hybris/data-storage-service-v1 concept20.core/data-storage-service]]}
                                 ::product-content-management-v1 {:yaas/services [[:hybris/product-service-v1 concept20.core/product-service]]}
                                 ::product-content-management-v2 {:yaas/services [[:hybris/product-service-v1 concept20.core/product-service]

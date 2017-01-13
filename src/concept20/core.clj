@@ -73,18 +73,18 @@
 (defn authorized? [yaas service function ctx requested-scope]
   (let [scopes-from-roles (apply clojure.set/union (for [role (roles ctx)]
                                                      (get-in @yaas [:yaas/config-db (tenant ctx) :config/authorization role] #{})))
-        originator (originator ctx)
-        {:keys [sec/scopes yaas/depends-on]} (get-in @yaas [:yaas/services originator])
-        scopes-from-originator  (apply clojure.set/union (for [service-bundle-id depends-on]
-                                                           (apply clojure.set/union (for [[service-id] (:yaas/services (load-service-bundle yaas service-bundle-id))]
-                                                                                      (get-in @yaas [:yaas/services service-id :sec/scopes])))))]
-
-    (= requested-scope (clojure.set/intersection
-                        (clojure.set/union scopes-from-roles ; add the scopes granted by the user's role assignment 
-                                           scopes-from-originator ; add scopes from all yaas services the current originator is dependent from
-                                           scopes ; add the scopes assigned to the originator
-)
-                        requested-scope))))
+        service-id (originator ctx)
+        {scopes-from-originator :sec/scopes dependencies :yaas/depends-on} (when service-id (load-service yaas service-id))
+        scopes-from-dependencies  (apply clojure.set/union (for [{required-scopes :sec/scopes service-id :yaas/service} dependencies
+                                                                 :let [available-scopes (get (load-service yaas service-id) :sec/scopes)]]
+                                                             (clojure.set/intersection available-scopes required-scopes)))
+        effective-scopes  (clojure.set/intersection
+                           (clojure.set/union scopes-from-roles
+                                              scopes-from-originator
+                                              scopes-from-dependencies)
+                           requested-scope)]
+    (println effective-scopes)
+    (= requested-scope effective-scopes)))
 
 (defn check-authorized? [yaas service function ctx requested-scope]
   (when-not (authorized? yaas service function ctx requested-scope)
@@ -151,7 +151,7 @@
        (provision ctx service-bundle subscription)
        (announce ctx service-bundle id))
      (doall (for [[service] services]
-              (doall (for [service-bunde-id (:yaas/depends-on (load-service yaas service))]
+              (doall (for [service-bunde-id (map :yaas/service-bundle (get (load-service yaas service) :yaas/depends-on))]
                        (subscribe yaas ctx id id service-bunde-id)))))
      id)))
 
